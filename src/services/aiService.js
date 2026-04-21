@@ -1,10 +1,11 @@
 const fs = require('fs');
 const path = require('path');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const logger = require('../utils/logger');
 
 /**
  * AI Move Estimation Service
- * Uses OpenAI Vision (GPT-4o) or Gemini to analyze item photos
+ * Uses Gemini to analyze item photos
  * Falls back to a mock estimator when no API key is provided (dev mode)
  */
 
@@ -15,6 +16,8 @@ const TRUCK_SIZES = [
   { label: 'Extra Large Truck', maxVolume: 1200, maxWeight: 10000 },
 ];
 
+const MIN_VOLUME_BY_BEDROOMS = { 1: 150, 2: 350, 3: 600, 4: 800 };
+
 function recommendTruck(estimatedVolume) {
   for (const truck of TRUCK_SIZES) {
     if (estimatedVolume <= truck.maxVolume) return truck.label;
@@ -22,124 +25,82 @@ function recommendTruck(estimatedVolume) {
   return 'Extra Large Truck';
 }
 
-function generatePriceEstimate(volume, distance) {
-  const baseRate = 120; // CAD per hour
-  const fuelRate = 0.85; // CAD per km
-  const volumeRate = 0.95; // CAD per cubic foot
-  const distKm = distance || 25;
-  const hours = Math.max(2, Math.ceil(volume / 80));
-  return Math.round(baseRate * hours + fuelRate * distKm + volumeRate * volume);
-}
-
-/**
- * Analyzes item photos using OpenRouter (Qwen VL) with streaming
- */
-async function analyzeWithOpenRouter(photoUrls) {
-  const { default: OpenAI } = await import('openai');
-  const client = new OpenAI({
-    apiKey: process.env.OPENROUTER_API_KEY,
-    baseURL: 'https://openrouter.ai/api/v1',
-    defaultHeaders: {
-      'HTTP-Referer': process.env.CLIENT_URL || 'https://kesmoving.ca',
-      'X-Title': 'Kesmoving AI Estimator',
-    },
-  });
-
-  const imageContent = photoUrls.slice(0, 10).map((url) => {
-    if (url.startsWith('http')) {
-      return { type: 'image_url', image_url: { url } };
-    }
-    const absPath = path.join(__dirname, '../../', url);
-    const base64 = fs.readFileSync(absPath).toString('base64');
-    const ext = path.extname(url).substring(1) || 'jpeg';
-    return { type: 'image_url', image_url: { url: `data:image/${ext};base64,${base64}` } };
-  });
-
-  const prompt = `You are a professional moving estimator. Analyze these images of household/commercial items and provide a JSON estimate.
-
-Return ONLY valid JSON in this exact format:
-{
-  "itemsDetected": ["list of item names"],
-  "estimatedVolume": <number in cubic feet>,
-  "estimatedWeight": <number in lbs>,
-  "loadingTime": <estimated hours as decimal>,
-  "aiConfidence": <0.0 to 1.0>,
-  "notes": "any special considerations"
-}
-
-Base your estimates on what you can see. Be conservative. Common volumes: sofa=35cf, bed=30cf, dresser=20cf, box=2cf, table=15cf.`;
-
-  const stream = await client.chat.completions.create({
-    model: 'qwen/qwen3-vl-235b-a22b-thinking',
-    messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, ...imageContent] }],
-    stream: true,
-  });
-
-  let fullText = '';
-  for await (const chunk of stream) {
-    const content = chunk.choices[0]?.delta?.content;
-    if (content) fullText += content;
+function sanitizeVolume(volume, bedrooms) {
+  const beds = Math.min(Number(bedrooms) || 1, 4);
+  const floor = MIN_VOLUME_BY_BEDROOMS[beds] || 150;
+  if (volume < floor) {
+    logger.warn(`AI_SERVICE: Volume ${volume} cu ft too low for ${beds}-bedroom. Clamping to ${floor} cu ft.`);
+    return floor;
   }
-
-  // Strip markdown code fences if the model wrapped its JSON
-  const jsonMatch = fullText.match(/```(?:json)?\s*([\s\S]*?)```/) || fullText.match(/(\{[\s\S]*\})/);
-  const jsonStr = jsonMatch ? jsonMatch[1].trim() : fullText.trim();
-  return JSON.parse(jsonStr);
+  return volume;
 }
 
-/**
- * Analyzes item photos using OpenAI Vision API
- */
-async function analyzeWithOpenAI(photoUrls) {
-  const { default: OpenAI } = await import('openai');
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+function resolveLocalImagePath(url) {
+  const normalized = String(url || '').replace(/^\/+/, '');
+  return path.join(__dirname, '../../', normalized);
+}
 
-  const imageContent = photoUrls.slice(0, 10).map((url) => {
-    // Support both absolute URLs and local file paths
-    if (url.startsWith('http')) {
-      return { type: 'image_url', image_url: { url, detail: 'low' } };
-    }
-    const absPath = path.join(__dirname, '../../', url);
-    const base64 = fs.readFileSync(absPath).toString('base64');
-    const ext = path.extname(url).substring(1) || 'jpeg';
-    return { type: 'image_url', image_url: { url: `data:image/${ext};base64,${base64}`, detail: 'low' } };
-  });
+async function analyzeWithGemini(photoUrls, bedrooms) {
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-  const prompt = `You are a professional moving estimator. Analyze these images of household/commercial items and provide a JSON estimate.
+  const imageParts = await Promise.all(
+    photoUrls.slice(0, 10).map(async (url) => {
+      if (url.startsWith('http')) {
+        const res = await fetch(url);
+        const buffer = await res.arrayBuffer();
+        const base64 = Buffer.from(buffer).toString('base64');
+        const mimeType = res.headers.get('content-type') || 'image/jpeg';
+        return { inlineData: { data: base64, mimeType } };
+      }
+      const absPath = resolveLocalImagePath(url);
+      const base64 = fs.readFileSync(absPath).toString('base64');
+      const ext = path.extname(url).substring(1) || 'jpeg';
+      return { inlineData: { data: base64, mimeType: `image/${ext}` } };
+    }),
+  );
 
-Return ONLY valid JSON in this exact format:
+  const prompt = `You are a professional moving estimator.
+Analyze these images and return ONLY valid JSON with no markdown:
 {
-  "itemsDetected": ["list of item names"],
-  "estimatedVolume": <number in cubic feet>,
-  "estimatedWeight": <number in lbs>,
-  "loadingTime": <estimated hours as decimal>,
+  "itemsDetected": ["list of items visible"],
+  "estimatedVolume": <cubic feet - a 4-bedroom house is 800-1200 cu ft>,
+  "estimatedWeight": <lbs>,
+  "loadingTime": <hours as decimal>,
   "aiConfidence": <0.0 to 1.0>,
-  "notes": "any special considerations"
+  "hasPiano": <true if piano visible>,
+  "hasPoolTable": <true if pool table visible>,
+  "hasSafe": <true if safe visible>,
+  "notes": "special considerations"
 }
+Rules:
+- Common volumes: sofa=35cf, bed=30cf, dresser=20cf, box=2cf, table=15cf, grand piano=25cf
+- This move is for a ${bedrooms || 1}-bedroom home, minimum expected volume is proportional
+- Do NOT return markdown fences. Return raw JSON only.`;
 
-Base your estimates on what you can see. Be conservative. Common volumes: sofa=35cf, bed=30cf, dresser=20cf, box=2cf, table=15cf.`;
-
-  const response = await client.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, ...imageContent] }],
-    max_tokens: 500,
-    response_format: { type: 'json_object' },
-  });
-
-  return JSON.parse(response.choices[0].message.content);
+  const result = await model.generateContent([prompt, ...imageParts]);
+  const text = result.response.text();
+  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/) || text.match(/(\{[\s\S]*\})/);
+  const jsonStr = jsonMatch ? jsonMatch[1].trim() : text.trim();
+  return JSON.parse(jsonStr);
 }
 
 /**
  * Mock estimator for development (when no API key is set)
  */
-function mockEstimate(photoCount) {
-  const volume = 20 + photoCount * 15 + Math.floor(Math.random() * 40);
+function mockEstimate(photoCount, bedrooms) {
+  const beds = Math.min(Number(bedrooms) || 1, 4);
+  const baseVolume = MIN_VOLUME_BY_BEDROOMS[beds] || 150;
+  const volume = baseVolume + photoCount * 10 + Math.floor(Math.random() * 30);
   return {
     itemsDetected: ['sofa', 'bed', 'dining table', 'chairs', 'boxes', 'dresser'].slice(0, 4 + photoCount),
     estimatedVolume: volume,
     estimatedWeight: Math.round(volume * 15),
     loadingTime: Math.max(1.5, Math.round((volume / 80) * 2) / 2),
     aiConfidence: 0.75 + Math.random() * 0.2,
+    hasPiano: false,
+    hasPoolTable: false,
+    hasSafe: false,
     notes: 'Mock estimate (development mode)',
   };
 }
@@ -147,32 +108,35 @@ function mockEstimate(photoCount) {
 /**
  * Main entry point — analyzes uploaded photos and returns a structured estimate
  */
-async function analyzeItems(photoUrls) {
+async function analyzeItems(photoUrls, bedrooms) {
   try {
     let raw;
 
-    if (process.env.OPENROUTER_API_KEY) {
-      logger.info('AI_SERVICE: Using OpenRouter (Qwen VL) for image analysis');
-      raw = await analyzeWithOpenRouter(photoUrls);
-    } else if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'your_openai_api_key_here') {
-      logger.info('AI_SERVICE: Using OpenAI (GPT-4o) for image analysis');
-      raw = await analyzeWithOpenAI(photoUrls);
+    if (process.env.GEMINI_API_KEY) {
+      logger.info('AI_SERVICE: Using Gemini (gemini-1.5-flash) for image analysis');
+      try {
+        raw = await analyzeWithGemini(photoUrls, bedrooms);
+      } catch (err) {
+        logger.warn(`AI_SERVICE: Gemini failed (${err.message}) — falling back to mock estimator`);
+        raw = mockEstimate(photoUrls.length, bedrooms);
+      }
     } else {
       logger.warn('AI_SERVICE: No API key configured — using mock estimator');
-      raw = mockEstimate(photoUrls.length);
+      raw = mockEstimate(photoUrls.length, bedrooms);
     }
 
-    const recommendedTruck = recommendTruck(raw.estimatedVolume);
-    const estimatedPrice = generatePriceEstimate(raw.estimatedVolume);
+    const sanitizedVolume = sanitizeVolume(raw.estimatedVolume, bedrooms);
 
     return {
       itemsDetected: raw.itemsDetected || [],
-      estimatedVolume: raw.estimatedVolume,
+      estimatedVolume: sanitizedVolume,
       estimatedWeight: raw.estimatedWeight,
       loadingTime: raw.loadingTime,
       aiConfidence: raw.aiConfidence,
-      recommendedTruck,
-      estimatedPrice,
+      hasPiano: raw.hasPiano || false,
+      hasPoolTable: raw.hasPoolTable || false,
+      hasSafe: raw.hasSafe || false,
+      recommendedTruck: recommendTruck(sanitizedVolume),
       rawAiResponse: raw,
     };
   } catch (err) {
