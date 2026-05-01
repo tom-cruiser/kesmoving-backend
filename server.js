@@ -13,6 +13,7 @@ const path = require('path');
 const logger = require('./src/utils/logger');
 const { registerTrackingSocket } = require('./src/sockets/trackingSocket');
 const { registerChatSocket } = require('./src/sockets/chatSocket');
+const { registerActivitySocket } = require('./src/sockets/activitySocket');
 
 // Route imports
 const authRoutes = require('./src/routes/authRoutes');
@@ -43,6 +44,7 @@ const io = new Server(server, {
 app.set('io', io);
 registerTrackingSocket(io);
 registerChatSocket(io);
+registerActivitySocket(io);
 
 // ─── Security Middleware ──────────────────────────────────────────────────────
 app.use(
