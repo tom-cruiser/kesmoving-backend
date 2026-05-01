@@ -202,14 +202,19 @@ const uploadPhotos = asyncHandler(async (req, res) => {
     return res.status(403).json({ success: false, message: 'Not authorized' });
   }
 
-  if (!req.files || req.files.length === 0) {
+  const photoUrls = Array.isArray(req.body.photoUrls)
+    ? req.body.photoUrls
+    : Array.isArray(req.body.itemPhotos)
+      ? req.body.itemPhotos
+      : [];
+
+  if (photoUrls.length === 0) {
     return res.status(400).json({ success: false, message: 'No photos uploaded' });
   }
 
-  const photos = req.files.map((f) => ({
-    url: `/uploads/items/${f.filename}`,
-    filename: f.filename,
-  }));
+  const photos = photoUrls.map((photo) =>
+    typeof photo === 'string' ? { url: photo } : photo,
+  );
 
   booking.itemPhotos.push(...photos);
   await booking.save();

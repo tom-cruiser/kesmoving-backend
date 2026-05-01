@@ -6,7 +6,6 @@ const {
   cancelBooking, updateBooking, deleteBooking,
 } = require('../controllers/bookingController');
 const { protect, authorize, staffOnly } = require('../middleware/auth');
-const { uploadItemPhotos, handleUploadError } = require('../middleware/upload');
 const validate = require('../middleware/validate');
 const { BOOKING_STATUSES, PAYMENT_STATUSES } = require('../models/Booking');
 
@@ -65,8 +64,6 @@ router.post(
   '/:id/photos',
   [param('id').isMongoId()],
   validate,
-  uploadItemPhotos,
-  handleUploadError,
   uploadPhotos
 );
 

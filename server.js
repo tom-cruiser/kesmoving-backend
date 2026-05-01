@@ -25,6 +25,7 @@ const chatRoutes = require('./src/routes/chatRoutes');
 const supportRoutes = require('./src/routes/supportRoutes');
 const analyticsRoutes = require('./src/routes/analyticsRoutes');
 const notificationRoutes = require('./src/routes/notificationRoutes');
+const uploadRoutes = require('./src/routes/uploadRoutes');
 
 const app = express();
 const server = http.createServer(app);
@@ -86,6 +87,7 @@ app.use('/api/chat', chatRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/uploads', uploadRoutes);
 
 // ─── Health Check ─────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {

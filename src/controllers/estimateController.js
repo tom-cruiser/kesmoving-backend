@@ -6,6 +6,29 @@ const asyncHandler = require("../utils/asyncHandler");
 const logger = require("../utils/logger");
 const notificationService = require("../services/notificationService");
 
+function buildFallbackPricingFromVision(vision) {
+  const baseHours = Number(vision?.loadingTime) || 3;
+  const labor = Math.max(450, Math.round(baseHours * 150));
+  const specialty =
+    (vision?.hasPiano ? 500 : 0) +
+    (vision?.hasPoolTable ? 400 : 0) +
+    (vision?.hasSafe ? 300 : 0);
+
+  return {
+    total_cad: labor + specialty,
+    hours: baseHours,
+    confidence: 0.55,
+    warnings: ["Pricing fallback used due to pricing service issue"],
+    breakdown: {
+      labor,
+      stairs: 0,
+      fuel: 0,
+      specialtyTotal: specialty,
+      tax: 0,
+    },
+  };
+}
+
 /**
  * @route   POST /api/estimate
  * @access  Private/Client (or staff)
@@ -190,26 +213,32 @@ const analyzePhotos = asyncHandler(async (req, res) => {
   const vision = await aiService.analyzeItems(photoUrls, bedrooms);
 
   // Step 2: pricing only (trusted logistics engine)
-  const estimate = await logisticsAgentService.generateEstimate({
-    pickup: req.body.pickup || {
-      address: req.body.pickupAddress,
-      province: req.body.pickupProvince,
-      elevator: req.body.pickupElevator,
-    },
-    destination: req.body.destination || {
-      address: req.body.destinationAddress,
-      province: req.body.destinationProvince,
-      elevator: req.body.destinationElevator,
-      floor: req.body.destinationFloor,
-    },
-    bedrooms,
-    move_date: req.body.move_date || req.body.moveDate || "",
-    notes: req.body.notes || "",
-    hasPiano: vision.hasPiano,
-    hasPoolTable: vision.hasPoolTable,
-    hasSafe: vision.hasSafe,
-    photos: photoUrls,
-  });
+  let estimate;
+  try {
+    estimate = await logisticsAgentService.generateEstimate({
+      pickup: req.body.pickup || {
+        address: req.body.pickupAddress,
+        province: req.body.pickupProvince,
+        elevator: req.body.pickupElevator,
+      },
+      destination: req.body.destination || {
+        address: req.body.destinationAddress,
+        province: req.body.destinationProvince,
+        elevator: req.body.destinationElevator,
+        floor: req.body.destinationFloor,
+      },
+      bedrooms,
+      move_date: req.body.move_date || req.body.moveDate || "",
+      notes: req.body.notes || "",
+      hasPiano: vision.hasPiano,
+      hasPoolTable: vision.hasPoolTable,
+      hasSafe: vision.hasSafe,
+      photos: photoUrls,
+    });
+  } catch (pricingError) {
+    logger.error(`ESTIMATE_ANALYZE_PRICING_FALLBACK: ${pricingError.message}`);
+    estimate = buildFallbackPricingFromVision(vision);
+  }
 
   // Step 3: return merged response
   res.json({

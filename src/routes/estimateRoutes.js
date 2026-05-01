@@ -7,7 +7,6 @@ const {
   generateAgentEstimate,
 } = require("../controllers/estimateController");
 const { protect, authorize } = require("../middleware/auth");
-const { uploadItemPhotos, handleUploadError } = require("../middleware/upload");
 const validate = require("../middleware/validate");
 
 const router = express.Router();
@@ -15,7 +14,7 @@ const router = express.Router();
 router.use(protect);
 
 // Stateless photo analysis — no booking required (used by new-booking wizard)
-router.post("/analyze", uploadItemPhotos, handleUploadError, analyzePhotos);
+router.post("/analyze", analyzePhotos);
 
 // Text-based logistics estimate agent for strict 2026 pricing output.
 router.post(

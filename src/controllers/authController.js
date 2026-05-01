@@ -187,4 +187,20 @@ const updateUserRole = asyncHandler(async (req, res) => {
   res.json({ success: true, data: user });
 });
 
-module.exports = { register, login, getProfile, updateProfile, refreshToken, logout, getAllUsers, updateUserRole };
+/**
+ * @route   PUT /api/auth/users/:id/password  (Admin only)
+ */
+const resetUserPassword = asyncHandler(async (req, res) => {
+  const { password } = req.body;
+
+  const user = await User.findById(req.params.id).select('+password');
+  if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+  user.password = password;
+  await user.save();
+
+  logger.info(`Admin ${req.user._id} reset password for user ${user._id} (${user.email})`);
+  res.json({ success: true, message: 'Password updated successfully' });
+});
+
+module.exports = { register, login, getProfile, updateProfile, refreshToken, logout, getAllUsers, updateUserRole, resetUserPassword };
