@@ -278,9 +278,40 @@ const generateAgentEstimate = asyncHandler(async (req, res) => {
   res.json(estimate);
 });
 
+/**
+ * @route   POST /api/estimate/public-quote  (No auth — landing page)
+ */
+const publicQuote = asyncHandler(async (req, res) => {
+  const { pickup, destination, bedrooms, moveDate, hasPiano, hasPoolTable, hasSafe, notes } = req.body;
+
+  const estimate = await logisticsAgentService.generateEstimate({
+    pickup: {
+      address: pickup?.city ? `${pickup.city}, ${pickup.province || 'ON'}` : '',
+      province: pickup?.province || 'ON',
+      elevator: pickup?.elevator ?? false,
+      floor: pickup?.floor ? Number(pickup.floor) : undefined,
+    },
+    destination: {
+      address: destination?.city ? `${destination.city}, ${destination.province || 'ON'}` : '',
+      province: destination?.province || 'ON',
+      elevator: destination?.elevator ?? false,
+      floor: destination?.floor ? Number(destination.floor) : undefined,
+    },
+    bedrooms: Number(bedrooms) || 1,
+    move_date: moveDate || '',
+    notes: notes || '',
+    hasPiano: hasPiano || false,
+    hasPoolTable: hasPoolTable || false,
+    hasSafe: hasSafe || false,
+  });
+
+  res.json({ success: true, data: estimate });
+});
+
 module.exports = {
   generateEstimate,
   reviewEstimate,
   analyzePhotos,
   generateAgentEstimate,
+  publicQuote,
 };

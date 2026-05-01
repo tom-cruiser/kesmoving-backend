@@ -5,11 +5,23 @@ const {
   reviewEstimate,
   analyzePhotos,
   generateAgentEstimate,
+  publicQuote,
 } = require("../controllers/estimateController");
 const { protect, authorize } = require("../middleware/auth");
 const validate = require("../middleware/validate");
 
 const router = express.Router();
+
+// ── Public (no auth) ─────────────────────────────────────────────────────────
+router.post(
+  "/public-quote",
+  [
+    body("bedrooms").optional().isInt({ min: 0, max: 10 }),
+    body("moveDate").optional().isString(),
+  ],
+  validate,
+  publicQuote,
+);
 
 router.use(protect);
 
