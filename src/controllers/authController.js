@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const logger = require('../utils/logger');
+const logActivity = require('../utils/activity');
 
 const generateToken = (userId) =>
   jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRE || '7d' });
@@ -70,6 +71,7 @@ const login = asyncHandler(async (req, res) => {
   user.password = undefined;
 
   logger.info(`User logged in: ${user.email} (${user.role})`);
+  logActivity(user, 'user.login', 'User', user._id, user.email);
 
   res.json({
     success: true,
@@ -184,6 +186,9 @@ const updateUserRole = asyncHandler(async (req, res) => {
   const user = await User.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
   if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
+  if (role) logActivity(req, 'user.role_updated', 'User', user._id, user.email, { newRole: role });
+  if (isActive !== undefined) logActivity(req, isActive ? 'user.activated' : 'user.deactivated', 'User', user._id, user.email);
+
   res.json({ success: true, data: user });
 });
 
@@ -200,6 +205,7 @@ const resetUserPassword = asyncHandler(async (req, res) => {
   await user.save();
 
   logger.info(`Admin ${req.user._id} reset password for user ${user._id} (${user.email})`);
+  logActivity(req, 'user.password_reset', 'User', user._id, user.email);
   res.json({ success: true, message: 'Password updated successfully' });
 });
 

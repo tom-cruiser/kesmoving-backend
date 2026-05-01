@@ -3,6 +3,7 @@ const Booking = require('../models/Booking');
 const asyncHandler = require('../utils/asyncHandler');
 const logger = require('../utils/logger');
 const { emitTruckTrackingUpdate } = require('../utils/trackingEvents');
+const logActivity = require('../utils/activity');
 
 /**
  * @route   GET /api/fleet
@@ -35,6 +36,7 @@ const getFleet = asyncHandler(async (req, res) => {
 const createTruck = asyncHandler(async (req, res) => {
   const truck = await Truck.create(req.body);
   logger.info(`Truck created: ${truck.truckId} by ${req.user.email}`);
+  logActivity(req, 'fleet.truck_created', 'Truck', truck._id, truck.licensePlate || truck.truckId);
   res.status(201).json({ success: true, data: truck });
 });
 
@@ -58,6 +60,7 @@ const getTruckById = asyncHandler(async (req, res) => {
 const updateTruck = asyncHandler(async (req, res) => {
   const truck = await Truck.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
   if (!truck) return res.status(404).json({ success: false, message: 'Truck not found' });
+  logActivity(req, 'fleet.truck_updated', 'Truck', truck._id, truck.licensePlate || truck.truckId);
   res.json({ success: true, data: truck });
 });
 
@@ -103,6 +106,7 @@ const deleteTruck = asyncHandler(async (req, res) => {
 
   await truck.deleteOne();
   logger.info(`Truck deleted: ${truck.truckId} by ${req.user.email}`);
+  logActivity(req, 'fleet.truck_deleted', 'Truck', truck._id, truck.licensePlate || truck.truckId);
   res.json({ success: true, message: 'Truck removed from fleet' });
 });
 

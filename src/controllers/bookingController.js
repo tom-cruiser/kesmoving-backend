@@ -3,6 +3,7 @@ const Notification = require('../models/Notification');
 const asyncHandler = require('../utils/asyncHandler');
 const notificationService = require('../services/notificationService');
 const logger = require('../utils/logger');
+const logActivity = require('../utils/activity');
 
 /**
  * @route   POST /api/bookings
@@ -50,6 +51,7 @@ const createBooking = asyncHandler(async (req, res) => {
   const booking = await Booking.create(bookingData);
 
   logger.info(`Booking created: ${booking.bookingNumber} by ${req.user.email}`);
+  logActivity(req, 'booking.created', 'Booking', booking._id, booking.bookingNumber);
 
   res.status(201).json({ success: true, data: booking });
 });
@@ -152,6 +154,7 @@ const updateBookingStatus = asyncHandler(async (req, res) => {
   await notificationService.sendBookingStatusNotification(booking, status, req.user);
 
   logger.info(`Booking ${booking.bookingNumber} status → ${status} by ${req.user.email}`);
+  logActivity(req, 'booking.status_changed', 'Booking', booking._id, booking.bookingNumber, { newStatus: status });
 
   res.json({ success: true, data: booking });
 });
@@ -186,6 +189,7 @@ const assignCrew = asyncHandler(async (req, res) => {
   await Truck.findByIdAndUpdate(truckId, { status: 'InUse', activeBooking: booking._id, driver: driverId });
 
   await notificationService.sendCrewAssignedNotification(booking, req.user);
+  logActivity(req, 'booking.crew_assigned', 'Booking', booking._id, booking.bookingNumber);
 
   res.json({ success: true, data: booking });
 });
@@ -242,6 +246,7 @@ const updatePaymentStatus = asyncHandler(async (req, res) => {
 
   await booking.save();
   await notificationService.sendPaymentNotification(booking);
+  logActivity(req, 'booking.payment_updated', 'Booking', booking._id, booking.bookingNumber, { status, amount });
 
   res.json({ success: true, data: booking });
 });
@@ -276,6 +281,7 @@ const cancelBooking = asyncHandler(async (req, res) => {
   await booking.save();
   await notificationService.sendBookingStatusNotification(booking, 'Cancelled', req.user);
   logger.info(`Booking ${booking.bookingNumber} cancelled by ${req.user.email}`);
+  logActivity(req, 'booking.cancelled', 'Booking', booking._id, booking.bookingNumber, { reason: cancellationReason });
 
   res.json({ success: true, data: booking });
 });
@@ -334,8 +340,10 @@ const deleteBooking = asyncHandler(async (req, res) => {
     return res.status(403).json({ success: false, message: 'Not authorized' });
   }
 
+  const ref = booking.bookingNumber || booking._id.toString();
   await booking.deleteOne();
-  logger.info(`Booking ${booking.bookingNumber || booking._id} deleted by ${req.user.email}`);
+  logger.info(`Booking ${ref} deleted by ${req.user.email}`);
+  logActivity(req, 'booking.deleted', 'Booking', booking._id, ref);
 
   res.json({ success: true, message: 'Booking deleted successfully' });
 });

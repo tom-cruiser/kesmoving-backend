@@ -5,6 +5,7 @@ const Booking = require("../models/Booking");
 const asyncHandler = require("../utils/asyncHandler");
 const logger = require("../utils/logger");
 const notificationService = require("../services/notificationService");
+const logActivity = require("../utils/activity");
 
 function buildFallbackPricingFromVision(vision) {
   const baseHours = Number(vision?.loadingTime) || 3;
@@ -179,6 +180,7 @@ const reviewEstimate = asyncHandler(async (req, res) => {
   }
 
   await booking.save();
+  logActivity(req, 'estimate.reviewed', 'Booking', booking._id, booking.bookingNumber, { estimatedPrice, confirm: !!confirm });
   res.json({ success: true, data: booking });
 });
 
