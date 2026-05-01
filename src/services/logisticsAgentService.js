@@ -164,8 +164,9 @@ function buildTextFromStructured(req) {
   const parts = [];
   if (req.bedrooms) parts.push(`${req.bedrooms}-bedroom`);
   if (req.pickup?.address) parts.push(`from ${req.pickup.address}`);
+  if (req.pickup?.floor) parts.push(`from floor ${req.pickup.floor}`);
   if (req.destination?.address) parts.push(`to ${req.destination.address}`);
-  if (req.destination?.floor) parts.push(`${req.destination.floor}th floor`);
+  if (req.destination?.floor) parts.push(`to floor ${req.destination.floor}`);
   if (req.destination?.elevator === false) parts.push("no elevator");
   if (req.destination?.elevator === true) parts.push("elevator available");
   if (req.move_date) parts.push(`moving on ${req.move_date}`);
@@ -229,10 +230,29 @@ function normalizeExtractedInputs(extracted, userRequest) {
       ? Math.floor(Number(extracted.bedrooms))
       : detectBedroomsFromText(text) || 1;
 
-  const floor =
+  const pickupFloor =
+    Number.isFinite(Number(extracted?.pickup_floor)) && Number(extracted.pickup_floor) > 0
+      ? Math.floor(Number(extracted.pickup_floor))
+      : null;
+
+  const destinationFloor =
+    Number.isFinite(Number(extracted?.destination_floor)) && Number(extracted.destination_floor) > 0
+      ? Math.floor(Number(extracted.destination_floor))
+      : null;
+
+  // Backward compat: old single 'floor' field
+  const legacyFloor =
     Number.isFinite(Number(extracted?.floor)) && Number(extracted.floor) > 0
       ? Math.floor(Number(extracted.floor))
-      : detectFloorFromText(text) || 1;
+      : null;
+
+  const detectedFloor = detectFloorFromText(text) || 1;
+
+  // Stair work happens at whichever end has the higher floor
+  const floor = Math.max(
+    pickupFloor ?? legacyFloor ?? detectedFloor,
+    destinationFloor ?? 1,
+  );
 
   const elevator =
     typeof extracted?.elevator === "boolean"
@@ -440,7 +460,8 @@ TASK: Return ONLY this JSON, no markdown:
 {
   "bedrooms": number,
   "estimated_hours": number,
-  "floor": number,
+  "pickup_floor": number,
+  "destination_floor": number,
   "elevator": boolean,
   "hasPiano": boolean,
   "hasPoolTable": boolean,
@@ -452,9 +473,11 @@ TASK: Return ONLY this JSON, no markdown:
 
 Rules:
 - Toronto/GTA -> ON, Montreal/Laval -> QC, Vancouver/Burnaby -> BC, default ON
+- pickup_floor = the floor the move starts FROM (origin building). destination_floor = the floor being moved INTO.
+- Stairs penalty uses whichever floor is higher (the harder end). Add +0.5h per stair flight above floor 1.
 - 3rd floor + no elevator mention = elevator: false
 - penthouse or high-rise = elevator: true
-- Add +0.5h per stair flight, +1.5h for heavy items
+- Add +1.5h for heavy items
 - A 4-bedroom house is 800-1200 cu ft, do not underestimate hours
 - Return raw JSON only, no markdown fences
 
@@ -548,7 +571,10 @@ async function generateEstimate(userRequest) {
           bedrooms: userRequest.bedrooms
             ? Number(userRequest.bedrooms)
             : undefined,
-          floor: userRequest.destination?.floor
+          pickup_floor: userRequest.pickup?.floor
+            ? Number(userRequest.pickup.floor)
+            : undefined,
+          destination_floor: userRequest.destination?.floor
             ? Number(userRequest.destination.floor)
             : undefined,
           elevator:
