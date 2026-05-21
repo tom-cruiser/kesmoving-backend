@@ -139,10 +139,16 @@ app.use((err, req, res, next) => {
 // ─── Database & Server Startup ────────────────────────────────────────────────
 async function startServer() {
   try {
-    await mongoose.connect(process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/kesmoving', {
-      serverSelectionTimeoutMS: 5000,
-    });
-    logger.info('MongoDB connected');
+    const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/kesmoving';
+
+    try {
+      await mongoose.connect(mongoUri, {
+        serverSelectionTimeoutMS: 5000,
+      });
+      logger.info('MongoDB connected');
+    } catch (mongoErr) {
+      logger.warn(`MongoDB unavailable, starting API in degraded mode: ${mongoErr.message}`);
+    }
 
     const PORT = process.env.PORT || 5000;
     server.listen(PORT, () => {

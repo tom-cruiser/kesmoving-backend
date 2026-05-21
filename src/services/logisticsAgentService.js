@@ -527,11 +527,21 @@ async function generateEstimate(userRequest) {
       process.env.MONGO_URI ||
       "mongodb://localhost:27017/kesmoving",
   );
+  let connected = false;
+  let db = null;
+  let pricing = { ...DEFAULT_PRICING_2026 };
 
   try {
-    await client.connect();
-    const db = client.db(process.env.MONGODB_DB_NAME || "bueccdb");
-    const pricing = await loadPricing(db);
+    try {
+      await client.connect();
+      connected = true;
+      db = client.db(process.env.MONGODB_DB_NAME || "bueccdb");
+      pricing = await loadPricing(db);
+    } catch (dbErr) {
+      logger.warn(
+        `LOGISTICS_AGENT: DB unavailable (${dbErr.message}) — using default 2026 pricing without persistence.`,
+      );
+    }
 
     // STEP 1 — detect structured vs string input
     const isStructured = typeof userRequest === "object" && userRequest !== null;
@@ -556,11 +566,13 @@ async function generateEstimate(userRequest) {
         ],
       };
 
-      await db.collection("estimates").insertOne({
-        ...remoteResult,
-        userInput: userRequest,
-        timestamp: new Date(),
-      });
+      if (db) {
+        await db.collection("estimates").insertOne({
+          ...remoteResult,
+          userInput: userRequest,
+          timestamp: new Date(),
+        });
+      }
 
       return remoteResult;
     }
@@ -616,20 +628,24 @@ async function generateEstimate(userRequest) {
 
     const estimate = calculateEstimate(extracted, pricing);
 
-    await db.collection("estimates").insertOne({
-      ...estimate,
-      userInput: userRequest,
-      extractedInput: extracted,
-      pricingSource: pricing.type || "pricing_2026",
-      timestamp: new Date(),
-    });
+    if (db) {
+      await db.collection("estimates").insertOne({
+        ...estimate,
+        userInput: userRequest,
+        extractedInput: extracted,
+        pricingSource: pricing.type || "pricing_2026",
+        timestamp: new Date(),
+      });
+    }
 
     return estimate;
   } catch (err) {
     logger.error(`LOGISTICS_AGENT_ERROR: ${err.message}`);
     throw err;
   } finally {
-    await client.close();
+    if (connected) {
+      await client.close();
+    }
   }
 }
 

@@ -348,8 +348,75 @@ const deleteBooking = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Booking deleted successfully' });
 });
 
+/**
+ * @route   POST /api/bookings/public
+ * @access  Public (anonymous)
+ * Creates a guest booking without requiring authentication. Limited fields only.
+ */
+const publicCreateBooking = asyncHandler(async (req, res) => {
+  const {
+    pickupAddress, destinationAddress, moveDate,
+    specialInstructions, moveSize, numberOfBedrooms, specialItems, notes,
+    aiEstimate, itemPhotos,
+    contactPhone, contactEmail,
+  } = req.body;
+
+  const bookingData = {
+    client: null,
+    pickupAddress,
+    destinationAddress,
+    moveDate: moveDate ? new Date(moveDate) : undefined,
+    specialInstructions: specialInstructions || (notes ? String(notes) : undefined),
+    moveSize,
+    numberOfBedrooms: Number(numberOfBedrooms) || 0,
+    timeline: [{ status: 'Pending', changedBy: null, note: 'Created via public quote form' }],
+    isGuestBooking: true,
+  };
+
+  if (specialItems && Array.isArray(specialItems) && specialItems.length > 0) {
+    bookingData.specialInstructions = [
+      bookingData.specialInstructions,
+      `Special items: ${specialItems.join(', ')}`,
+    ].filter(Boolean).join('\n');
+  }
+
+  if (aiEstimate && typeof aiEstimate === 'object') {
+    bookingData.aiEstimate = aiEstimate;
+  }
+
+  if (Array.isArray(itemPhotos) && itemPhotos.length > 0) {
+    bookingData.itemPhotos = itemPhotos.map((url) => (typeof url === 'string' ? { url } : url));
+  }
+
+  // Attach contact info if provided (not required)
+  if (contactPhone) bookingData.contactPhone = contactPhone;
+  if (contactEmail) bookingData.contactEmail = contactEmail;
+
+  const booking = await Booking.create(bookingData);
+
+  logger.info(`Public booking created: ${booking.bookingNumber || booking._id}`);
+  logActivity(req, 'booking.created.public', 'Booking', booking._id, booking.bookingNumber || booking._id.toString());
+
+  // Notify sales team for follow-up
+  try {
+    await notificationService.notifySalesTeamForReview(booking);
+  } catch (notifyErr) {
+    logger.error(`Failed to notify sales team for public booking: ${notifyErr.message}`);
+  }
+
+  res.status(201).json({ success: true, data: booking });
+});
+
 module.exports = {
-  createBooking, getBookings, getBookingById, updateBookingStatus,
-  assignCrew, uploadPhotos, updatePaymentStatus,
-  cancelBooking, updateBooking, deleteBooking,
+  createBooking,
+  publicCreateBooking,
+  getBookings,
+  getBookingById,
+  updateBookingStatus,
+  assignCrew,
+  uploadPhotos,
+  updatePaymentStatus,
+  cancelBooking,
+  updateBooking,
+  deleteBooking,
 };

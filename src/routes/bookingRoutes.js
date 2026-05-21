@@ -11,6 +11,26 @@ const { BOOKING_STATUSES, PAYMENT_STATUSES } = require('../models/Booking');
 
 const router = express.Router();
 
+// Public booking endpoint (anonymous) — rate limited to prevent abuse
+const rateLimit = require('express-rate-limit');
+const publicLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, message: { success: false, message: 'Too many requests from this IP, please try again later.' } });
+
+router.post(
+  '/public',
+  publicLimiter,
+  [
+    body('pickupAddress').isObject().withMessage('Pickup address required'),
+    body('pickupAddress.city').notEmpty().withMessage('Pickup city required'),
+    body('pickupAddress.province').notEmpty().withMessage('Pickup province required'),
+    body('destinationAddress').isObject().withMessage('Destination address required'),
+    body('destinationAddress.city').notEmpty().withMessage('Destination city required'),
+    body('destinationAddress.province').notEmpty().withMessage('Destination province required'),
+    body('moveDate').optional().isISO8601().withMessage('Move date must be a valid date'),
+  ],
+  validate,
+  require('../controllers/bookingController').publicCreateBooking,
+);
+
 router.use(protect);
 
 router.post(

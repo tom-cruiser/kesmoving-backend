@@ -23,10 +23,10 @@ router.post(
   publicQuote,
 );
 
-router.use(protect);
-
-// Stateless photo analysis — no booking required (used by new-booking wizard)
+// Stateless photo analysis for landing + new-booking flows (no auth required)
 router.post("/analyze", analyzePhotos);
+
+router.use(protect);
 
 // Text-based logistics estimate agent for strict 2026 pricing output.
 router.post(
